@@ -1,0 +1,117 @@
+name: CI/CD Pipeline
+
+
+on:
+  push:
+    branches:
+      - main
+
+
+  workflow_dispatch:
+
+
+permissions:
+  contents: read
+
+
+jobs:
+  build-and-test:
+    name: Build e testes
+    runs-on: ubuntu-latest
+
+
+    steps:
+      - name: Obter código-fonte
+        uses: actions/checkout@v6
+
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+
+      - name: Instalar dependências
+        run: npm ci
+
+
+      - name: Executar testes
+        run: npm test
+
+
+  deploy:
+    name: Deploy remoto
+    needs: build-and-test
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+
+
+    steps:
+      - name: Obter código-fonte
+        uses: actions/checkout@v6
+
+
+      - name: Configurar acesso SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_KNOWN_HOSTS: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        run: |
+          set -eu
+
+
+          test -n "$SSH_PRIVATE_KEY" || {
+            echo "Erro: o segredo SSH_PRIVATE_KEY não está configurado."
+            exit 1
+          }
+
+
+          test -n "$SERVER_KNOWN_HOSTS" || {
+            echo "Erro: o segredo SERVER_KNOWN_HOSTS não está configurado."
+            exit 1
+          }
+
+
+          install -m 700 -d ~/.ssh
+
+
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+
+          printf '%s\n' "$SERVER_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+
+      - name: Validar configurações do servidor
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+
+
+          test -n "$SERVER_HOST" || {
+            echo "Erro: o segredo SERVER_HOST não está configurado."
+            exit 1
+          }
+
+
+          test -n "$SERVER_USER" || {
+            echo "Erro: o segredo SERVER_USER não está configurado."
+            exit 1
+          }
+
+
+      - name: Executar deploy remoto
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+
+
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes \
+            "SERVERUSER@SERVER_HOST" \
+            "bash /var/www/ci-cd-demo/deploy_script.sh"
